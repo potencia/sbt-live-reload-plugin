@@ -12,17 +12,31 @@ import com.typesafe.config.ConfigFactory
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
-import scala.util.Random
 import akka.http.scaladsl.model.StatusCodes
+import java.nio.file.Paths
+import java.nio.file.Path
 
 object Server extends Utils with FileIO.Live {
 
-  private val wsFlow: Flow[Message,Message,NotUsed] = Flow.fromSinkAndSource(
+  private var _root: Path = _
+
+  private var currentReload = 0
+  private val reloadMessage = Some(TextMessage("RELOAD"))
+
+  private def wsFlow: Flow[Message,Message,NotUsed] = {
+    var reloaded = currentReload
+    Flow.fromSinkAndSource(
     Sink.foreach(println),
-    Source.tick(5.seconds, 5.seconds, (): Unit).map(_ => TextMessage(Random.nextInt().toString)))
+    Source.tick(1.seconds, 1.seconds, (): Unit).mapConcat(_ =>
+        reloadMessage.filter(_ =>
+            if (reloaded < currentReload) {
+              reloaded = currentReload
+              true
+            } else false).toList))
+  }
 
   private val routes: Route = concat(
-    path("hello") { handleWebSocketMessages(wsFlow) },
+    path("reload") { handleWebSocketMessages(wsFlow) },
     respondWithHeader(`Cache-Control`(
       CacheDirectives.`no-store`,
       CacheDirectives.`max-age`(0))) {
@@ -33,7 +47,7 @@ object Server extends Utils with FileIO.Live {
             case "/live-reload.js" =>
               complete(fromResource("live-reload-opt.js"))
             case path =>
-              fromPath(".", path.drop(1).mkString) match {
+              fromPath(_root, path.drop(1).mkString) match {
                 case Some(e) => complete(e)
                 case None => complete(StatusCodes.NotFound)
               }
@@ -55,7 +69,8 @@ object Server extends Utils with FileIO.Live {
 
   private var _binding: Option[ServerBinding] = None
 
-  def ensureRunning(): String = {
+  def ensureRunning(root: Path = Paths.get(".")): String = {
+    _root = root
     val b = _binding match {
       case Some(b) => b
       case None =>
@@ -74,5 +89,9 @@ object Server extends Utils with FileIO.Live {
     _binding = None
     _actorSystem map(a => Await.ready(a.terminate, 30.seconds))
     _actorSystem = None
+  }
+
+  def triggerReload(): Unit = {
+    currentReload += 1
   }
 }

@@ -6,7 +6,7 @@ import akka.http.scaladsl.model.ContentType
 import akka.http.scaladsl.model.ContentTypes._
 import akka.http.scaladsl.model.MediaTypes
 import akka.http.scaladsl.model.HttpCharsets
-import java.nio.file.{Path, Paths}
+import java.nio.file.Path
 
 trait Utils extends FileIO {
 
@@ -35,37 +35,56 @@ trait Utils extends FileIO {
   def fromResource(contentType: Option[ContentType], path: String): HttpEntity.Strict =
     contentType.foldLeft(HttpEntity(fileIO.loadResource(path)))(_ withContentType _)
 
-  def fromPath(root: String, path: String): Option[HttpEntity.Strict] = {
-    val absPath = Paths.get(root).resolve(path)
+  def fromPath(root: Path, path: String): Option[HttpEntity.Strict] = {
+    val absPath = root.resolve(path)
     fileIO.pathType(absPath) match {
       case NotFound => None
       case File => Some(fromPath(contentTypeFromFilename(path), absPath))
-      case Directory => Some(HttpEntity(
-        s"""<!DOCTYPE html>
-           |<html>
-           |  <head>
-           |    <title>Live Reload Server</title>
-           |    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-           |    <style>
-           |      body {
-           |        background: #fff;
-           |      }
-           |    </style>
-           |  </head>
-           |  <body>
-           |    <header>
-           |      <h1>$path</h1>
-           |    </header>
-           |    <hr />
-           |    <main>
-           |      <pre id="contents">
-           |Stuff goes here.
-           |      </pre>
-           |    </main>
-           |    <hr />
-           |  </body>
-           |</html>
-           |""".stripMargin) withContentType `text/html(UTF-8)`)
+      case Directory =>
+
+        val (directories, files) = absPath.toFile.listFiles.partition(_.isDirectory)
+
+        def formatFile(f: java.io.File): String = {
+          val name = f.getName + (if (f.isDirectory) "/" else "")
+          s"""<a href="$name">$name</a>"""
+        }
+
+        def formatFileList(files: Array[java.io.File]) =
+          if (files.isEmpty) ""
+          else files
+            .sortBy(_.getName)
+            .map(formatFile(_))
+            .mkString("\n", "\n", "")
+
+        val parentDirectory =
+          if (path.isEmpty) ""
+          else """<a href="../">../</a>"""
+
+        Some(HttpEntity(
+          s"""<!DOCTYPE html>
+             |<html>
+             |  <head>
+             |    <title>Live Reload Server</title>
+             |    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+             |    <style>
+             |      body {
+             |        background: #fff;
+             |      }
+             |    </style>
+             |  </head>
+             |  <body>
+             |    <header>
+             |      <h1>${if (path.isEmpty) "/" else path}</h1>
+             |    </header>
+             |    <hr />
+             |    <main>
+             |      <pre id="contents">$parentDirectory${formatFileList(directories)}${formatFileList(files)}</pre>
+             |    </main>
+             |    <hr />
+             |  </body>
+             |</html>
+             |
+             |""".stripMargin) withContentType `text/html(UTF-8)`)
     }
   }
 

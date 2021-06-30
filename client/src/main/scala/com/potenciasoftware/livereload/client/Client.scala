@@ -5,14 +5,14 @@ import org.scalajs.dom, dom.document, dom.raw._
 object Client {
 
   def main(args: Array[String]): Unit = {
-    val h1 = document.createElement("h1")
-    document.body.appendChild(h1)
     val ws = new WebSocket(wsUrl)
     ws.onopen = { (event: Event) =>
       println("Opened the WS connection")
     }
     ws.onmessage = { (event: MessageEvent) =>
-      h1.textContent = event.data.toString
+      if (event.data == "RELOAD")
+        document.location.reload(true)
+      else println(s"Unknown event: ${event.data}")
     }
   }
 
@@ -24,6 +24,6 @@ object Client {
       case "https:" => "wss:"
       case "http:" => "ws:"
     }
-    s"$ws//$host/hello"
+    s"$ws//$host/reload"
   }
 }

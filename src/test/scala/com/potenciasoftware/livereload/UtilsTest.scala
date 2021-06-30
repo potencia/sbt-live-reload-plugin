@@ -23,10 +23,11 @@ class UtilsTest extends AnyFlatSpec with Matchers
     }
 
     it should s"have $expected when loaded from path" in {
-      val path = Paths.get("root", fileName)
+      val root = Paths.get("root")
+      val path = root.resolve(fileName)
       fileIO.pathType _ expects path returns File
       fileIO.loadFile _ expects path returns "content"
-      val entity = fromPath("root", fileName).get
+      val entity = fromPath(root, fileName).get
       entity.data.utf8String shouldBe "content"
       entity.contentType shouldBe expected
     }
