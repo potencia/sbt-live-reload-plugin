@@ -1,53 +1,38 @@
 package com.potenciasoftware.livereload
 
-import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.http.scaladsl.Http, Http.ServerBinding
 import akka.http.scaladsl.model.headers._
-import akka.http.scaladsl.model.ws._
+import akka.http.scaladsl.model.StatusCodes
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.Route
-import akka.stream.scaladsl._
 import com.typesafe.config.ConfigFactory
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
-import akka.http.scaladsl.model.StatusCodes
 import java.nio.file.Paths
 import java.nio.file.Path
 
-object Server extends Utils with FileIO.Live {
-
-  private var _root: Path = _
+class Server(host: String, port: Int, root: Path) extends Utils with FileIO.Live {
 
   private var currentReload = 0
-  private val reloadMessage = Some(TextMessage("RELOAD"))
 
-  private def wsFlow: Flow[Message,Message,NotUsed] = {
-    var reloaded = currentReload
-    Flow.fromSinkAndSource(
-    Sink.foreach(println),
-    Source.tick(1.seconds, 1.seconds, (): Unit).mapConcat(_ =>
-        reloadMessage.filter(_ =>
-            if (reloaded < currentReload) {
-              reloaded = currentReload
-              true
-            } else false).toList))
+  def reload(): Unit = {
+    currentReload += 1
   }
 
   private val routes: Route = concat(
-    path("reload") { handleWebSocketMessages(wsFlow) },
     respondWithHeader(`Cache-Control`(
       CacheDirectives.`no-store`,
       CacheDirectives.`max-age`(0))) {
         get { extractUnmatchedPath { path =>
           path.toString match {
-            case "/index.html" =>
-              complete(fromResource("html/index.html"))
+            case "/reload" =>
+              complete(currentReload.toString)
             case "/live-reload.js" =>
               complete(fromResource("live-reload-opt.js"))
             case path =>
-              fromPath(_root, path.drop(1).mkString) match {
+              fromPath(root, path.drop(1).mkString) match {
                 case Some(e) => complete(e)
                 case None => complete(StatusCodes.NotFound)
               }
@@ -55,43 +40,52 @@ object Server extends Utils with FileIO.Live {
         }}
       })
 
-  private var _actorSystem: Option[ActorSystem] = None
-  private def actorSystem: ActorSystem = _actorSystem match {
-    case Some(a) => a
+  private var state: Option[(ActorSystem, ServerBinding)] = None
+
+  def startup(): String = (state match {
+
     case None =>
+
       val cl = getClass.getClassLoader
-      _actorSystem = Some(ActorSystem(
+      implicit val system = ActorSystem(
         "live-reload",
         config = ConfigFactory.load(cl),
-        classLoader = cl))
-      _actorSystem.get
-  }
+        classLoader = cl)
 
-  private var _binding: Option[ServerBinding] = None
+      val binding = Await.result(
+        Http().newServerAt(host, port).bindFlow(routes),
+        30.seconds)
 
-  def ensureRunning(root: Path = Paths.get(".")): String = {
-    _root = root
-    val b = _binding match {
-      case Some(b) => b
-      case None =>
+      state = Some((system, binding))
+      binding
 
-        implicit val system = actorSystem
-        _binding = Some(Await.result(Http()
-          .newServerAt("0.0.0.0", 12345)
-          .bindFlow(routes), 30.seconds))
-        _binding.get
+    case Some((_, binding)) => binding
+
+  }).localAddress.toString
+
+  def shutdown(): Unit = {
+
+    state foreach { case (system, binding) =>
+      Await.result(binding.unbind(), 30.seconds)
+      Await.result(system.terminate(), 30.seconds)
     }
-    b.localAddress.toString
+
+    currentReload = 0
+    state = None
   }
+}
+
+object Server extends Utils with FileIO.Live {
+
+  private val server: Server = new Server("0.0.0.0", 12345, Paths.get("."))
+
+  def ensureRunning(): String = server.startup()
 
   def ensureAkkaStopped(): Unit = {
-    _binding map(a => Await.result(a.unbind(), 30.seconds))
-    _binding = None
-    _actorSystem map(a => Await.ready(a.terminate, 30.seconds))
-    _actorSystem = None
+    server.shutdown()
   }
 
   def triggerReload(): Unit = {
-    currentReload += 1
+    server.reload()
   }
 }
