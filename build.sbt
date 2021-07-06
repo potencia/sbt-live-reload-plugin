@@ -21,7 +21,7 @@ lazy val root = project
   .in(file("."))
   .enablePlugins(SbtPlugin)
   .settings(
-    name := "sbt-scalajs-live-reload",
+    name := "sbt-live-reload",
     Compile / resources += {
       (client / Compile / fullOptJS).value
       (client / Compile / fullOptJS / artifactPath).value
