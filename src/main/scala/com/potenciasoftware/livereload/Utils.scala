@@ -147,7 +147,7 @@ trait Utils extends FileIO {
     val renderer = HtmlRenderer.builder().build()
     val html = renderer.render(document)
     Some(HttpEntity(
-      "<!DOCTYPE html><html><head><style>body{font-family: BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif;}pre code{background-color: #eeeef4; padding: .25em;}</style><head>" +
+      "<!DOCTYPE html><html><head><style>body{font-family: BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif;}pre{background-color: #eeeef4; padding: .25em;}</style><head>" +
       s"""<body>$html<script src="/live-reload.js"></script></body></html>""") withContentType `text/html(UTF-8)`)
   }
 }
