@@ -1,12 +1,12 @@
 package com.potenciasoftware.livereload
 
-import FileIO.PathType._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalamock.scalatest.MockFactory
 import akka.http.scaladsl.model.ContentType
 import akka.http.scaladsl.model.ContentTypes._
 import java.nio.file.Paths
+import FileIO.File
 
 class UtilsTest extends AnyFlatSpec with Matchers
     with MockFactory with Utils {
@@ -16,17 +16,16 @@ class UtilsTest extends AnyFlatSpec with Matchers
   def hasRawContentType(fileName: String, expected: ContentType): Unit = {
 
     it should s"have $expected when loaded from resource" in {
-      fileIO.loadResource _ expects fileName returns "content"
+      fileIO.loadResource _ expects fileName returns File(Paths.get(fileName), "content")
       val entity = fromResource(fileName)
-      entity.data.utf8String shouldBe "content"
-      entity.contentType shouldBe expected
+      entity.map(_.data.utf8String) shouldBe Some("content")
+      entity.map(_.contentType) shouldBe Some(expected)
     }
 
     it should s"have $expected when loaded from path with preferRaw=true" in {
       val root = Paths.get("root")
       val path = root.resolve(fileName)
-      fileIO.pathType _ expects path returns File
-      fileIO.loadFile _ expects path returns "content"
+      fileIO.loadFile _ expects path returns File(path, "content")
       val entity = fromPath(root, fileName, true, Map.empty).get
       entity.data.utf8String shouldBe "content"
       entity.contentType shouldBe expected
@@ -35,8 +34,7 @@ class UtilsTest extends AnyFlatSpec with Matchers
     it should s"have $expected when loaded from path with preferRaw=false and raw=true" in {
       val root = Paths.get("root")
       val path = root.resolve(fileName)
-      fileIO.pathType _ expects path returns File
-      fileIO.loadFile _ expects path returns "content"
+      fileIO.loadFile _ expects path returns File(path, "content")
       val entity = fromPath(root, fileName, false, Map("raw" -> "true")).get
       entity.data.utf8String shouldBe "content"
       entity.contentType shouldBe expected
@@ -50,15 +48,13 @@ class UtilsTest extends AnyFlatSpec with Matchers
     val path = root.resolve(fileName)
 
     it should s"have $expected when loaded with preferRaw=false" in {
-      fileIO.pathType _ expects path returns File
-      fileIO.loadFile _ expects path returns "content"
+      fileIO.loadFile _ expects path returns File(path, "content")
       val entity = fromPath(root, fileName, false, Map.empty).get
       entity.contentType shouldBe expected
     }
 
     it should s"have $expected when loaded with preferRaw=true and raw=false" in {
-      fileIO.pathType _ expects path returns File
-      fileIO.loadFile _ expects path returns "content"
+      fileIO.loadFile _ expects path returns File(path, "content")
       val entity = fromPath(root, fileName, true, Map("raw" -> "false")).get
       entity.data.utf8String should endWith("</html>")
       entity.contentType shouldBe expected

@@ -1,6 +1,5 @@
 package com.potenciasoftware.livereload
 
-import FileIO.PathType._
 import akka.http.scaladsl.model.HttpEntity
 import akka.http.scaladsl.model.ContentType
 import akka.http.scaladsl.model.ContentTypes._
@@ -11,6 +10,7 @@ import org.commonmark.parser.Parser
 import org.commonmark.node.Node
 import org.commonmark.renderer.html.HtmlRenderer
 import akka.util.ByteString
+import FileIO.{Directory, File, Location, NotFound}
 
 trait Utils extends FileIO {
 
@@ -27,21 +27,18 @@ trait Utils extends FileIO {
     `application/json`,
     `application/javascript(UTF-8)`)
 
-  /** Get the text following the last period. */
-  private def extractExtension(path: String): Option[String] =
-    Some(path.split("\\.")).filter(_.length > 1).map(_.last)
-
   private def contentTypeFromExtension(ext: Option[String]): Option[ContentType] =
     for {
       _ext <- ext
       ct <- contentTypes.find(_.mediaType.fileExtensions.contains(_ext))
     } yield ct
 
-  def fromResource(path: String): HttpEntity.Strict =
-    fromResource(contentTypeFromExtension(extractExtension(path)), path)
-
-  def fromResource(contentType: Option[ContentType], path: String): HttpEntity.Strict =
-    contentType.foldLeft(HttpEntity(fileIO.loadResource(path)))(_ withContentType _)
+  def fromResource(path: String): Option[HttpEntity.Strict] =
+    Some(fileIO.loadResource(path))
+      .collect { case f: File =>
+        contentTypeFromExtension(f.ext)
+          .foldLeft(HttpEntity(f.content))(_ withContentType _)
+      }
 
   private val trueRegex = "(?i)^(true)|(yes)|(on)$".r
   private def testShowDotFiles(params: Map[String, String]): Boolean =
@@ -70,46 +67,45 @@ trait Utils extends FileIO {
   }
 
   def fromPath(root: Path, path: String, preferRaw: Boolean, params: Map[String, String]): Option[HttpEntity.Strict] = {
-    val absPath = root.resolve(path)
     val liveReload = testLiveReload(params)
     val raw = testRaw(params, preferRaw)
-    (fileIO.pathType(absPath) match {
-      case NotFound => None
-      case File => extractExtension(path) match {
-        case Some("md") if !raw => fromMdPath(absPath)
-        case ext => Some(fromPath(contentTypeFromExtension(ext), absPath))
+    (fileIO.loadFile(root.resolve(path)) match {
+      case f: File => f.ext match {
+        case Some("md") if !raw => fromMd(f)
+        case ext => Some(fromFile(contentTypeFromExtension(ext), f))
       }
-      case Directory => fromDirectoryPath(absPath, path.isEmpty, testShowDotFiles(params), liveReload)
+      case d: Directory =>
+        fromDirectory(d, path.isEmpty, testShowDotFiles(params), liveReload)
+      case _: NotFound => None
     })
       .map(wrapJavascript(Some(path.toString).filter(_ => !raw), preferRaw))
       .map(addLiveReload(liveReload))
   }
 
-  def fromPath(contentType: Option[ContentType], path: Path): HttpEntity.Strict =
-    contentType.foldLeft(HttpEntity(fileIO.loadFile(path)))(_ withContentType _ )
+  def fromFile(contentType: Option[ContentType], file: File): HttpEntity.Strict =
+    contentType.foldLeft(HttpEntity(file.content))(_ withContentType _ )
 
-  def fromDirectoryPath(path: Path, isRoot: Boolean, showDotFiles: Boolean, liveReload: Boolean): Option[HttpEntity.Strict] = {
+  def fromDirectory(dir: Directory, isRoot: Boolean, showDotFiles: Boolean, liveReload: Boolean): Option[HttpEntity.Strict] = {
 
     def a(text: String): String =
       if (liveReload) s"""<a href="$text?liveReload=on">$text</a>"""
       else s"""<a href="$text">$text</>"""
 
     val (directories, files) =
-      path.toFile
-        .listFiles
-        .filter(f => (f.getName, showDotFiles) match {
+      dir.list
+        .filter(f => (f.name, showDotFiles) match {
           case (_, true) => true
           case (name, false) => !name.startsWith(".")
         })
         .partition(_.isDirectory)
 
-    def formatFile(f: java.io.File): String =
-      a(f.getName + (if (f.isDirectory) "/" else ""))
+    def formatFile(f: Location): String =
+      a(f.name + (if (f.isDirectory) "/" else ""))
 
-    def formatFileList(files: Array[java.io.File]) =
+    def formatFileList(files: Seq[Location]) =
       if (files.isEmpty) ""
       else files
-        .sortBy(_.getName)
+        .sortBy(_.name)
         .map(formatFile(_))
         .mkString("\n", "\n", "")
 
@@ -129,7 +125,7 @@ trait Utils extends FileIO {
          |  </head>
          |  <body>
          |    <header>
-         |      <h1>${if (isRoot) "/" else path}</h1>
+         |      <h1>${if (isRoot) "/" else dir.path}</h1>
          |    </header>
          |    <hr />
          |    <main>
@@ -141,9 +137,9 @@ trait Utils extends FileIO {
          |""".stripMargin) withContentType `text/html(UTF-8)`)
   }
 
-  def fromMdPath(path: Path): Option[HttpEntity.Strict] = {
+  def fromMd(f: File): Option[HttpEntity.Strict] = {
     val parser = Parser.builder().build()
-    val document: Node = parser.parse(fileIO.loadFile(path))
+    val document: Node = parser.parse(f.content)
     val renderer = HtmlRenderer.builder().build()
     val html = renderer.render(document)
     Some(HttpEntity(
