@@ -12,10 +12,11 @@ import scala.concurrent.Await
 import scala.concurrent.duration._
 import java.io.File
 import sbt.util.Logger
-import akka.http.scaladsl.server.RouteResult
-import scala.concurrent.Future
-import akka.http.scaladsl.server.RequestContext
 import akka.http.scaladsl.model.HttpEntity
+import akka.http.scaladsl.marshalling.ToResponseMarshaller
+import akka.http.scaladsl.marshalling.Marshaller
+import akka.http.scaladsl.model.HttpResponse
+import akka.http.scaladsl.model.StatusCode
 
 class Server(
     log: Logger,
@@ -26,11 +27,11 @@ class Server(
     extends Utils
     with FileIO.Live {
 
-  private def completeOrNotFound:
-  PartialFunction[Option[HttpEntity.Strict], RequestContext => Future[RouteResult]] = {
-    case Some(e) => complete(e)
-    case _ => complete(StatusCodes.NotFound)
-  }
+  implicit private val optionalStrictHttpEntityM: ToResponseMarshaller[Option[HttpEntity.Strict]] =
+    Marshaller.apply[Option[HttpEntity.Strict], HttpResponse] { implicit ctx => o =>
+      if (o.isEmpty) implicitly[ToResponseMarshaller[StatusCode]].apply(StatusCodes.NotFound)
+      else implicitly[ToResponseMarshaller[HttpEntity.Strict]].apply(o.get)
+    }
 
   private val rootPath = root.toPath
 
@@ -43,9 +44,9 @@ class Server(
             case "/reload" =>
               complete(currentReload.toString)
             case "/live-reload.js" =>
-              completeOrNotFound(fromResource("live-reload-opt.js"))
+              complete(fromResource("live-reload-opt.js"))
             case path =>
-              completeOrNotFound(fromPath(rootPath, path.drop(1).mkString, preferRaw, params))
+              complete(fromPath(rootPath, path.drop(1).mkString, preferRaw, params))
           }
         }}}
       })

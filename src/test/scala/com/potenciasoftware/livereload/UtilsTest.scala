@@ -7,11 +7,21 @@ import akka.http.scaladsl.model.ContentType
 import akka.http.scaladsl.model.ContentTypes._
 import java.nio.file.Paths
 import FileIO.File
+import akka.http.scaladsl.marshalling.Marshal
+import scala.concurrent.Awaitable
+import scala.concurrent.Await
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.duration._
+import akka.http.scaladsl.model.HttpResponse
 
 class UtilsTest extends AnyFlatSpec with Matchers
     with MockFactory with Utils {
 
   override val fileIO = mock[FileIO.Service]
+
+  private implicit class TestAwaitable[A](a: Awaitable[A]) {
+    def await: A = Await.result(a, 1.second)
+  }
 
   def hasRawContentType(fileName: String, expected: ContentType): Unit = {
 
@@ -59,6 +69,12 @@ class UtilsTest extends AnyFlatSpec with Matchers
       entity.data.utf8String should endWith("</html>")
       entity.contentType shouldBe expected
     }
+  }
+
+  "File" should "marshal to text/plain" in {
+    val file = File(Paths.get("filename.txt"), "content")
+    val response = Marshal(file).to[HttpResponse].await
+    response.entity.contentType shouldBe `text/plain(UTF-8)`
   }
 
   "no extension" should behave like hasRawContentType("test", `text/plain(UTF-8)`)

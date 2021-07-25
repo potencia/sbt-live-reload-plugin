@@ -11,6 +11,7 @@ import org.commonmark.node.Node
 import org.commonmark.renderer.html.HtmlRenderer
 import akka.util.ByteString
 import FileIO.{Directory, File, Location, NotFound}
+import akka.http.scaladsl.marshalling._
 
 trait Utils extends FileIO {
 
@@ -39,6 +40,12 @@ trait Utils extends FileIO {
         contentTypeFromExtension(f.ext)
           .foldLeft(HttpEntity(f.content))(_ withContentType _)
       }
+
+  implicit val fileMarshaller: ToEntityMarshaller[File] =
+    Marshaller.opaque[File, HttpEntity.Strict] { file =>
+      contentTypeFromExtension(file.ext)
+        .foldLeft(HttpEntity(file.content))(_ withContentType _)
+    }
 
   private val trueRegex = "(?i)^(true)|(yes)|(on)$".r
   private def testShowDotFiles(params: Map[String, String]): Boolean =
